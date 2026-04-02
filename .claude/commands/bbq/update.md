@@ -1,7 +1,9 @@
 ---
 name: bbq:update
 description: Met à jour le système BBQ — knowledge, commandes, agents. Outil de construction du système lui-même.
+argument-hint: "<description du changement à faire>"
 allowed-tools: [Read, Bash, Write, Task, WebSearch]
+model: claude-opus-4-6
 ---
 
 <role>
@@ -110,12 +112,17 @@ Issues : open → in-progress → resolved
 | bbq:menu | Oui | Non | Roadmap globale |
 </knowledge>
 
-<workflow>
-Quand l'utilisateur lance /bbq:update, suis ces étapes dans l'ordre :
+<instructions>
 
-## 1. Comprendre la demande
+## Phase 1 — Comprendre la demande
 
-L'utilisateur va te décrire ce qu'il veut changer, ajouter, ou améliorer dans le système BBQ.
+L'utilisateur a fourni une description via `$ARGUMENTS` :
+
+```
+$ARGUMENTS
+```
+
+Analyse cette description. L'utilisateur veut changer, ajouter, ou améliorer quelque chose dans le système BBQ.
 Ça peut être :
 - Une nouvelle commande à créer
 - Une commande existante à modifier
@@ -124,9 +131,14 @@ L'utilisateur va te décrire ce qu'il veut changer, ajouter, ou améliorer dans 
 - Un changement dans le CLAUDE.md du projet BBQ
 - Une idée floue qu'il faut transformer en quelque chose de concret
 
-## 2. Poser des questions
+Lis les fichiers existants pertinents à la demande :
+- Toujours lire `CLAUDE.md` à la racine
+- Lire les commandes et agents existants dans `.claude/` qui sont liés à la demande
+- Utilise Glob pour trouver les fichiers pertinents
 
-AVANT de rédiger quoi que ce soit, tu poses des questions. Beaucoup de questions.
+## Phase 2 — Poser des questions
+
+tu poses des questions juste apres avoir recu la demande. Beaucoup de questions.
 Tu veux comprendre :
 - Comment c'est supposé fonctionner exactement ?
 - Quels sont les cas limites ?
@@ -137,27 +149,48 @@ Tu veux comprendre :
 Tu poses tes questions en batch (3-5 à la fois), pas une par une.
 Si les réponses sont vagues, tu re-questionnes. Tu ne devines pas.
 
-## 3. Présenter le changement
+Si la description dans `$ARGUMENTS` est déjà très détaillée et complète,
+tu peux réduire les questions aux zones d'ombre restantes. Mais tu poses
+TOUJOURS au moins une question de validation.
+
+## Phase 3 — Présenter le changement
 
 Une fois que tu comprends, tu présentes :
-- CE QUI VA CHANGER : quels fichiers, quelles sections
-- À QUOI ÇA VA RESSEMBLER : un aperçu concret du résultat
-- CE QUE ÇA IMPACTE : les autres commandes affectées, les effets de bord
+- **CE QUI VA CHANGER** : quels fichiers, quelles sections
+- **À QUOI ÇA VA RESSEMBLER** : un aperçu concret du résultat
+- **CE QUE ÇA IMPACTE** : les autres commandes affectées, les effets de bord
 
-Tu attends la validation de l'utilisateur avant de procéder.
+**NE CONTINUE PAS** tant que l'utilisateur n'a pas validé.
+Tout message qui n'est pas une validation claire est une continuation de la discussion.
 
-## 4. Rédiger
+## Phase 4 — Rédiger et appliquer
 
 Tu rédiges le changement en XML structuré quand c'est un plan ou une spec.
 Tu rédiges en Markdown quand c'est une commande ou un agent.
 Tu appliques toutes les bonnes pratiques listées dans <knowledge>.
 
-## 5. Appliquer
-
 Tu écris les fichiers modifiés/créés.
 Tu mets à jour le CLAUDE.md si la roadmap ou les conventions changent.
-Tu confirmes ce qui a été fait.
-</workflow>
+Tu confirmes ce qui a été fait avec un résumé :
+
+```
+---
+
+## 🔧 Update complété
+
+### Fichiers créés/modifiés :
+- [liste des fichiers touchés avec description]
+
+### Impact sur les autres commandes :
+- [ce qui change pour les autres commandes, si applicable]
+
+### Prochaines étapes :
+- [suggestions de ce qui pourrait être fait ensuite]
+
+---
+```
+
+</instructions>
 
 <rules>
 - Ne rédige JAMAIS sans avoir posé tes questions d'abord

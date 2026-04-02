@@ -22,6 +22,7 @@ Ce projet n'a pas de stack traditionnelle. C'est une collection de fichiers Mark
   - `scanner.md` — scan codebase + WebSearch technos → rapport structuré
   - `doc-writer.md` — rédige tech-stack.md, PROJECT.md, CLAUDE.md (Opus 4.6)
   - `doc-reviewer.md` — review la doc vs le codebase, identifie les manques
+  - `doc-scanner.md` — scanne .docs/ pour trouver les fichiers pertinents à une feature
 - **Structure cible** : `.planning/` et `.docs/` créés dans le projet de l'utilisateur
 
 ## Conventions
@@ -39,20 +40,24 @@ allowed-tools: [Read, Bash, Write, Task]
 ---
 ```
 
-### Format XML dans les plans
+### Format XML des plans d'exécution (produits par /bbq:prep)
 
-Les plans d'exécution utilisent du XML structuré (comme GSD) :
+Les plans sont des prompts autonomes en XML — le subagent de /bbq:cook les exécute sans contexte additionnel :
 
 ```xml
-<task type="auto">
-  <n>Nom de la tâche</n>
-  <files>chemin/vers/fichier.ts</files>
-  <action>
-    Instructions précises pour l'exécution.
-  </action>
-  <verify>Comment vérifier que c'est fait correctement</verify>
-  <done>Critère de complétion</done>
-</task>
+<plan id="FXXX" version="N" feature="nom" date="YYYY-MM-DD">
+  <objective>Ce que le plan accomplit en 1-2 phrases.</objective>
+  <context>Stack, patterns, fichiers pertinents — minimum nécessaire.</context>
+  <steps>
+    <step n="1">
+      <name>Nom descriptif</name>
+      <what>Ce qui doit être fait — haut niveau, concret.</what>
+      <files>Fichiers à créer ou modifier</files>
+    </step>
+  </steps>
+  <success_criteria>Critères vérifiables concrètement.</success_criteria>
+  <out_of_scope>Ce que le cook ne doit PAS faire.</out_of_scope>
+</plan>
 ```
 
 ### Structure `.planning/` dans le projet cible
@@ -97,11 +102,11 @@ Issues : `open` → `in-progress` → `resolved`
 |----------|------|--------|
 | `bbq:update` | Met à jour le système BBQ lui-même | 🔨 En cours |
 | `bbq:fire` | Setup projet (scan + interview + tech-stack.md + PROJECT.md + CLAUDE.md) | ✅ Fait |
-| `bbq:grill` | Brainstorm adversarial → spec.md | À faire |
+| `bbq:grill` | Brainstorm adversarial → spec.md | ✅ Fait |
 | `bbq:marinade` | Recherche/collecte de contexte (optionnel) | À faire |
-| `bbq:prep` | Planification itérative → plan-vX.md | À faire |
-| `bbq:cook` | Exécution via subagent → code + commit | À faire |
-| `bbq:burns` | Création de tickets d'issues | À faire |
+| `bbq:prep` | Planification itérative → plan-vX.md | ✅ Fait |
+| `bbq:cook` | Exécution via subagent → code + commit | ✅ Fait |
+| `bbq:burns` | Création de tickets d'issues | ✅ Fait |
 | `bbq:status` | Vue d'ensemble du projet | À faire |
 | `bbq:menu` | Roadmap / backlog global (optionnel) | À faire |
 
