@@ -1,7 +1,7 @@
 ---
 name: executor
 description: Exécute un plan XML de feature — code chaque étape dans l'ordre, retourne un résumé structuré
-model: claude-opus-4-6
+model: opus
 mode: subagent
 allowed-tools: [Read, Bash, Write, Glob, Grep, Edit]
 ---

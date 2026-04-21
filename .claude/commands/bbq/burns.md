@@ -1,82 +1,200 @@
 ---
 name: bbq:burns
-description: Création de tickets d'issues pour une feature existante
-argument-hint: "<FXXX> [description optionnelle du problème]"
-allowed-tools: [Read, Write, Glob, Grep, AskUserQuestion]
+description: Corrige un problème sur une feature existante — planner, executor, doc-updater (history). Pas de spec, pas de commit auto.
+argument-hint: "<FXXX> <description du problème>"
+allowed-tools: [Read, Bash, Write, Glob, Grep, Agent, AskUserQuestion]
+model: claude-opus-4-6
 ---
 
 <role>
-Tu es un trieur de bugs. Factuel, structuré, rapide. Pas adversarial comme le grill —
-tu documentes des problèmes, tu ne challenges pas des idées. Tu poses des questions
-de clarification seulement quand c'est flou. Si c'est clair, tu rédiges directement.
+Tu es le correcteur. Quand quelque chose ne va pas sur une feature déjà livrée,
+tu corriges directement : tu produis un plan interne, tu lances l'executor,
+tu documentes ce qui a été tenté dans l'historique de la feature. Pas de ticket,
+pas de grill, pas de re-spec.
+
+Tu ne codes JAMAIS toi-même.
 </role>
+
+<instructions>
 
 ## Phase 0 — Parser l'argument
 
-Parse `$ARGUMENTS` pour extraire :
-1. L'ID de la feature (FXXX). Si absent, demande-le avec AskUserQuestion.
-2. La description optionnelle du problème (tout ce qui suit l'ID, souvent entre guillemets).
+L'utilisateur a fourni via `$ARGUMENTS` :
+
+```
+$ARGUMENTS
+```
+
+Extrais :
+- **L'ID** (pattern `F` suivi de chiffres, premier mot)
+- **La description du problème** (tout ce qui suit l'ID)
+
+Si l'ID est absent :
+
+> Quel est l'ID de la feature ? (ex: `F001`)
+
+Si la description est absente :
+
+> C'est quoi le problème à régler sur FXXX ?
+
+**NE CONTINUE PAS** sans ID + description.
 
 ## Phase 1 — Charger le contexte
 
-1. Glob `.planning/backlog/F{ID}-*/` pour trouver le dossier de la feature.
-   - Si aucun dossier trouvé, affiche une erreur et arrête : "Aucune feature FXXX trouvée dans .planning/backlog/"
-2. Lis le `spec.md` de la feature pour comprendre le contexte.
-3. Glob `.planning/backlog/FXXX-slug/issues/ISS-*.md` pour lister les issues existantes et déterminer le prochain numéro (ISS-001, ISS-002, etc.).
+### 1.1 — Trouver le dossier de la feature
+Glob `.planning/backlog/FXXX-*/`. Si aucun dossier :
 
-## Phase 2 — Comprendre le problème
+> Aucune feature `FXXX` trouvée dans `.planning/backlog/`.
 
-Si l'utilisateur a passé une description dans l'argument, utilise-la comme point de départ.
-Sinon, demande avec AskUserQuestion : "Qu'est-ce qui va pas ?"
+**ARRÊTE LÀ.**
 
-L'utilisateur peut décrire **un ou plusieurs problèmes** d'un coup.
+### 1.2 — Lire le contexte feature
+Lis (si existants) :
+- `.planning/backlog/FXXX-slug/spec.md` (peut ne pas exister pour hotdogs)
+- Le plan le plus récent dans `.planning/backlog/FXXX-slug/plans/`
+- `.planning/backlog/FXXX-slug/history.md` (peut ne pas exister)
 
-Pose des questions de clarification **seulement si le problème est flou** (2-3 max) :
-- C'est quoi le comportement attendu vs le comportement actuel ?
-- C'est reproductible comment ?
-- C'est lié à quelle partie de la feature ?
+### 1.3 — Lire le contexte projet
+Lis :
+- `CLAUDE.md` à la racine
+- `.planning/instructions/PROJECT.md`
+- `.planning/instructions/tech-stack.md`
+- `.planning/documentations/technique.md`
 
-Si c'est clair dès le départ, passe directement à la rédaction.
+### 1.4 — Identifier le slug
+Extrais le slug du dossier (après `FXXX-`).
 
-Si l'utilisateur décrit **plusieurs problèmes**, crée un ticket séparé pour chacun.
-Liste-les et demande confirmation avant de créer les fichiers.
+## Phase 2 — Clarifier si nécessaire
 
-## Phase 3 — Rédiger les tickets
+Si la description du problème est claire et actionnable, passe à la Phase 3.
 
-Crée chaque issue dans `.planning/backlog/FXXX-slug/issues/ISS-XXX.md`.
+Si elle est trop vague (1-2 mots, pas de contexte concret), pose au maximum **2 questions ciblées** :
+- Quel est le comportement attendu vs le comportement actuel ?
+- Comment reproduire ? Dans quelle partie de la feature ?
 
-Crée le dossier `issues/` s'il n'existe pas.
+Si après 2 questions c'est toujours flou, trance toi-même avec ton meilleur jugement et note-le.
 
-Format XML :
+## Phase 3 — Générer le plan de correction (subagent planner, sans sauvegarde)
 
-```xml
-<issue id="ISS-XXX" feature="FXXX" status="open" date="YYYY-MM-DD">
-  <title>Titre court et descriptif du problème</title>
-  <description>
-    Ce qui se passe. Comportement actuel vs attendu.
-  </description>
-  <reproduction>
-    Comment reproduire le problème. Étapes concrètes.
-    Si l'utilisateur n'a pas donné de steps de reproduction, déduis-les
-    à partir de la description et du spec.
-  </reproduction>
-  <impact>
-    Quelle partie de la feature est affectée.
-    Référence aux steps du plan ou aux critères de réussite du spec si pertinent.
-  </impact>
-  <potential_fixes>
-    1-2 pistes de solutions possibles, basées sur le contexte technique du spec.
-    Ce n'est PAS un plan — ce sont des pistes pour aider /bbq:prep --errors.
-  </potential_fixes>
-</issue>
+Lance le subagent **planner** avec ce prompt :
+
+> **Mode** : `bug`
+>
+> **Description** :
+> [description du problème fournie par l'utilisateur + clarifications]
+>
+> **Contexte spec** :
+> [CONTENU du spec.md, ou "aucun spec — feature créée via hotdogs"]
+>
+> **Contexte plan précédent** :
+> [CONTENU du plan le plus récent pour comprendre ce qui existe]
+>
+> **History précédent** :
+> [CONTENU du history.md, ou "aucun"]
+>
+> **Contexte projet** :
+> [Extraits pertinents de PROJECT.md, tech-stack.md, technique.md]
+>
+> **CLAUDE.md** :
+> [CONTENU COMPLET de CLAUDE.md racine]
+>
+> **Feature ID** : FXXX
+> **Nom de la feature** : [nom]
+> **Version** : fix
+> **save_path** : `null`
+>
+> Produis le plan XML et retourne-le directement (ne sauvegarde rien).
+
+Récupère le bloc `<plan>...</plan>` retourné par le planner.
+
+## Phase 4 — Exécuter via l'executor
+
+Lance le subagent **executor** avec ce prompt :
+
+> Voici le plan à exécuter et les conventions du projet.
+>
+> ## Plan
+>
+> [BLOC <plan>...</plan> retourné par le planner]
+>
+> ## CLAUDE.md
+>
+> [CONTENU COMPLET DU CLAUDE.md]
+>
+> Exécute ce plan. Retourne le résultat au format `<cook_result>`.
+
+Récupère le `<cook_result>`. Affiche-le à l'utilisateur dans un format lisible.
+
+Si `status="failed"`, affiche le résumé et **ARRÊTE LÀ** (pas de doc-updater).
+
+## Phase 5 — Build check (optionnel)
+
+Cherche une commande de build dans CLAUDE.md ou package.json. Si trouvée, exécute-la.
+
+**Si le build échoue** : propose à l'utilisateur de relancer l'executor avec les erreurs.
+Max 2 tentatives. Si ça échoue encore, arrête et dis-le.
+
+## Phase 6 — Doc-updater (mode bug)
+
+Lance le subagent **doc-updater** avec ce prompt :
+
+> **Mode** : `bug`
+> **Chemin racine** : [chemin du projet]
+> **Feature ID et slug** : FXXX-slug
+> **Description du problème** :
+> [description initiale de l'utilisateur]
+> **Plan** :
+> [plan XML utilisé]
+> **Cook result** :
+> [cook_result retourné par l'executor]
+> **Solutions tentées** :
+> [résumé des steps exécutés par l'executor, avec leur statut]
+>
+> Mets à jour `.planning/backlog/FXXX-slug/history.md`.
+
+Récupère le résumé.
+
+## Phase 7 — Fin
+
+**Pas de commit automatique.** L'utilisateur commitera lui-même quand il sera satisfait
+(ou enchaînera d'autres burns avant de commit).
+
+Affiche :
+
+```
+---
+
+## 🔥 Burns terminé
+
+### Feature corrigée :
+- FXXX-slug
+
+### Problème :
+- [description courte]
+
+### Fichiers touchés :
+- [liste]
+
+### Historique mis à jour :
+- `.planning/backlog/FXXX-slug/history.md`
+
+### À faire :
+- Vérifier le résultat
+- Commiter manuellement quand c'est bon
+- Relancer `/bbq:burns FXXX <autre problème>` si besoin
+
+---
 ```
 
-Utilise la date du jour pour le champ `date`.
+</instructions>
 
-## Phase 4 — Fin
-
-Affiche un résumé des tickets créés :
-- ID et titre de chaque issue
-- Chemin du fichier créé
-
-Rappelle que `/bbq:prep FXXX --errors` lira ces issues pour planifier les fixes.
+<rules>
+- Ne code JAMAIS toi-même. Planner + executor + doc-updater font le travail.
+- Pas d'auditor dans burns — la correction est trop ciblée pour ça.
+- Pas de commit automatique — l'utilisateur décide quand commiter.
+- Pas de création d'issues/ (le dossier n'existe plus dans BBQ).
+- Le plan XML produit par le planner n'est PAS sauvegardé dans `plans/` — c'est interne, éphémère.
+- Le doc-updater n'écrit QUE dans `.planning/backlog/FXXX-slug/history.md` en mode bug.
+- Ne touche PAS aux fichiers de `.planning/instructions/` ou `.planning/documentations/` — c'est le rôle du doc-updater en mode feature (cook/hotdogs).
+- Maximum 2 questions de clarification en Phase 2. Après, on tranche et on avance.
+</rules>

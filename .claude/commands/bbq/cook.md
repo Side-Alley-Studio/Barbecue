@@ -1,15 +1,14 @@
 ---
 name: bbq:cook
-description: Exécution d'une feature — lance le subagent executor sur le dernier plan, build check, commit
+description: Exécution d'une feature — executor, auditor, doc-updater, commit
 argument-hint: "<FXXX>"
 allowed-tools: [Read, Bash, Write, Glob, Grep, Agent, AskUserQuestion]
 model: claude-opus-4-6
 ---
 
 <role>
-Tu es le chef d'exécution. Tu charges le plan, tu lances l'executor, tu vérifies le résultat,
-et tu livres. Tu ne codes pas toi-même — tu délègues au subagent executor et tu gères
-le cycle de vie autour.
+Tu es le chef d'exécution. Tu charges le plan, tu orchestres trois subagents
+(executor → auditor → doc-updater), et tu livres. Tu ne codes pas toi-même.
 </role>
 
 <instructions>
@@ -22,9 +21,7 @@ L'utilisateur a fourni via `$ARGUMENTS` :
 $ARGUMENTS
 ```
 
-Extrais l'ID de la feature : le premier mot qui matche le pattern `F` suivi de chiffres (ex: `F001`, `F012`).
-
-Si l'ID est absent ou invalide :
+Extrais l'ID (pattern `F` suivi de chiffres). Si absent :
 
 > Quel est l'ID de la feature ? (ex: `F001`)
 
@@ -32,41 +29,35 @@ Si l'ID est absent ou invalide :
 
 ## Phase 1 — Charger le contexte
 
-### 1.1 — Trouver le plan
+### 1.1 — Trouver le plan et le spec
+Glob `.planning/backlog/FXXX-*/plans/plan-v*.md`. Si aucun plan :
 
-Glob `.planning/backlog/FXXX-*/plans/plan-v*.md` (en remplaçant FXXX par l'ID extrait).
-
-Si aucun plan n'existe :
-
-> Aucun plan trouvé pour `FXXX`. Lance `/bbq:prep FXXX` d'abord.
+> Aucun plan trouvé pour `FXXX`. Lance `/bbq:grill` ou `/bbq:hotdogs` d'abord.
 
 **ARRÊTE LÀ.**
 
-Si plusieurs plans existent, prends celui avec le numéro de version le plus élevé.
-Lis son contenu en entier.
+Prends le plan avec le numéro de version le plus élevé. Lis-le en entier.
+
+Glob `.planning/backlog/FXXX-*/spec.md`. Lis le spec s'il existe (peut ne pas exister pour hotdogs).
 
 ### 1.2 — Lire le CLAUDE.md
-
-Lis `CLAUDE.md` à la racine du projet. Si le fichier n'existe pas :
+Lis `CLAUDE.md` à la racine. Si absent :
 
 > Pas de `CLAUDE.md` trouvé à la racine. Lance `/bbq:fire` d'abord.
 
 **ARRÊTE LÀ.**
 
 ### 1.3 — Identifier le slug
+Extrais le slug du dossier de la feature (après `FXXX-`).
 
-Extrais le slug du dossier de la feature (le nom du dossier après `FXXX-`).
-Tu en auras besoin pour le commit et les mises à jour de statut.
+## Phase 2 — Passer le statut à in-progress
 
-## Phase 2 — Mettre à jour le statut
+Si un spec.md existe, remplace `status="drafted"` ou `status="planned"` par `status="in-progress"`.
+S'il est déjà `in-progress` ou `done`, ne change rien.
 
-Dans `.planning/backlog/FXXX-slug/spec.md`, remplace `status="drafted"` ou `status="planned"` par `status="in-progress"`.
+## Phase 3 — Executor
 
-Si le statut est déjà `in-progress` ou `done`, ne change rien.
-
-## Phase 3 — Lancer le subagent executor
-
-Lance le subagent **executor** avec ce prompt EXACT (en remplaçant les placeholders) :
+Lance le subagent **executor** avec ce prompt :
 
 > Voici le plan à exécuter et les conventions du projet.
 >
@@ -82,101 +73,123 @@ Lance le subagent **executor** avec ce prompt EXACT (en remplaçant les placehol
 
 Ne passe RIEN d'autre. Le plan est autosuffisant.
 
-## Phase 4 — Récupérer et afficher le résultat
+Récupère le `<cook_result>`. Si `status="failed"`, affiche le résumé et **ARRÊTE LÀ**.
 
-Le subagent retourne un `<cook_result>`. Affiche-le à l'utilisateur dans un format lisible :
+## Phase 4 — Auditor (boucle max 2 tentatives)
 
-```
----
+### 4.1 — Premier audit
 
-## Résultat de l'exécution
+Lance le subagent **auditor** avec ce prompt :
 
-**Statut** : [complete | partial | failed]
-
-### Fichiers créés :
-- [liste]
-
-### Fichiers modifiés :
-- [liste]
-
-### Étapes complétées :
-- [résumé par étape]
-
-### Problèmes rencontrés :
-- [issues ou "Aucun"]
-
----
-```
-
-Si le statut est `failed`, affiche le résumé et **ARRÊTE LÀ**. Dis à l'utilisateur de vérifier manuellement.
-
-## Phase 5 — Build check
-
-Cherche une commande de build :
-1. Dans `CLAUDE.md`, cherche des mentions de commandes comme `npm run build`, `npm run check`, `pnpm build`, `cargo build`, `go build`, etc.
-2. Si rien dans CLAUDE.md, lis `package.json` à la racine et cherche les scripts `build`, `check`, `typecheck`, `lint`.
-3. Si rien trouvé nulle part, skip cette étape et passe à la Phase 6.
-
-Si une commande de build est trouvée, exécute-la.
-
-**Si le build réussit** : passe à la Phase 6.
-
-**Si le build échoue** :
-
-Affiche l'erreur clairement et propose :
-
-> Le build a échoué. Tu veux que je relance l'executor avec les erreurs pour qu'il corrige ?
-
-Si l'utilisateur accepte :
-- Relance le subagent executor avec ce prompt :
-
-> Voici le plan original, les conventions du projet, et les erreurs de build à corriger.
+> **Spec** :
+> [CONTENU COMPLET DU spec.md, ou "aucun" si inexistant]
 >
-> ## Plan
->
+> **Plan** :
 > [CONTENU COMPLET DU plan-vX.md]
+>
+> **Cook result** :
+> [cook_result retourné par l'executor]
+>
+> **Chemin racine** : [chemin du projet]
+> **Tentative** : 1
+>
+> Audite le code produit.
+
+Récupère `<audit_result>`.
+
+### 4.2 — Traitement du verdict
+
+**Si `status="ok"`** : passe à la Phase 5.
+
+**Si `status="needs_fix"`** :
+1. Affiche à l'utilisateur un résumé court : "Audit a trouvé X problèmes, correction en cours..."
+2. Relance l'executor avec ce prompt :
+
+> Voici un plan de correction suite à un audit du code que tu viens de produire.
+>
+> ## Plan de correction
+>
+> [Le `<correction_plan>` retourné par l'auditor, en incluant son `<plan>` complet]
 >
 > ## CLAUDE.md
 >
 > [CONTENU COMPLET DU CLAUDE.md]
 >
-> ## Erreurs de build
+> Exécute ces corrections. Retourne le résultat au format `<cook_result>`.
+
+3. Récupère le nouveau `<cook_result>`.
+4. Relance l'auditor avec **Tentative** : 2, en lui passant aussi le rapport d'audit précédent.
+5. Si la tentative 2 retourne encore `status="needs_fix"`, passe en mode escalate : affiche les findings restants à l'utilisateur et demande :
+
+> L'auditor trouve encore des problèmes après 2 tentatives :
+> [liste des findings]
 >
-> [OUTPUT DE LA COMMANDE DE BUILD]
+> Tu veux :
+> (a) Laisser tel quel, je passe à la suite
+> (b) Me dire manuellement quoi faire, je relance l'executor avec tes instructions
+> (c) Arrêter ici, je ne finalise pas
+
+**Si `status="escalate"`** :
+Affiche les `<concerns>` à l'utilisateur sous forme de questions claires. Attends sa réponse.
+Selon sa décision :
+- Laisser tel quel → passe à la Phase 5
+- Corriger avec ses instructions → relance l'executor avec un prompt incluant ses instructions, puis relance l'auditor une fois
+
+## Phase 5 — Build check (optionnel)
+
+Cherche une commande de build :
+1. Dans `CLAUDE.md`, cherche des mentions de `npm run build`, `npm run check`, `pnpm build`, `cargo build`, `go build`, etc.
+2. Si rien, lis `package.json` et cherche les scripts `build`, `check`, `typecheck`, `lint`.
+3. Si rien trouvé, skip.
+
+Si une commande existe, exécute-la.
+
+**Si le build échoue** : affiche l'erreur et propose :
+
+> Le build a échoué. Je relance l'executor avec les erreurs ?
+
+Si oui, relance l'executor avec les erreurs comme plan de correction. Max 2 tentatives.
+Si ça échoue encore, arrête et dis-le.
+
+## Phase 6 — Doc-updater (mode feature)
+
+Lance le subagent **doc-updater** avec ce prompt :
+
+> **Mode** : `feature`
+> **Chemin racine** : [chemin du projet]
+> **Feature ID et slug** : FXXX-slug
+> **Cook result** : [dernier cook_result après audit]
+> **Plan** :
+> [CONTENU DU plan-vX.md]
+> **Spec** :
+> [CONTENU DU spec.md, ou "aucun"]
 >
-> Corrige ces erreurs en respectant le plan et les conventions. Retourne le résultat au format `<cook_result>`.
+> Mets à jour la documentation projet.
 
-Puis re-affiche le résultat et re-run le build check. Maximum 2 tentatives de correction.
-Si ça échoue encore après 2 tentatives, arrête et dis-le.
+Récupère le résumé. Affiche à l'utilisateur ce qui a été mis à jour.
 
-Si l'utilisateur refuse, passe à la Phase 6 quand même (l'utilisateur corrigera manuellement).
+## Phase 7 — Commit
 
-## Phase 6 — Commit et finalisation
-
-### 6.1 — Commit automatique
-
-Crée un commit avec le message au format :
+Crée un commit au format :
 
 ```
-FXXX-slug: description courte de quelques mots
+FXXX-slug: description courte
 ```
 
-La description courte doit résumer ce que la feature fait en quelques mots (extraite de l'`<objective>` du plan).
+La description courte vient de l'`<objective>` du plan.
 
-### 6.2 — Demander validation
+## Phase 8 — Validation et finalisation
 
-Affiche le résumé final et demande :
+Affiche le résumé final puis demande :
 
 > Tout est bon ? Si oui, je passe le statut à `done`.
 
-### 6.3 — Passer à done
+Si validation :
+- Dans `spec.md`, remplace `status="in-progress"` par `status="done"`.
 
-Si l'utilisateur valide :
-- Dans `.planning/backlog/FXXX-slug/spec.md`, remplace `status="in-progress"` par `status="done"`.
+Si non, laisse `in-progress`.
 
-Si l'utilisateur ne valide pas, laisse le statut à `in-progress`.
-
-## Phase 7 — Fin
+## Phase 9 — Fin
 
 Affiche :
 
@@ -186,18 +199,23 @@ Affiche :
 ## 🍖 Cook terminé
 
 ### Feature :
-- `FXXX-slug` — [nom de la feature]
+- FXXX-slug — [nom]
 
 ### Fichiers touchés :
 - [résumé des créations/modifications]
 
+### Audit :
+- [nombre de tentatives, verdict final]
+
+### Documentation :
+- [fichiers mis à jour par doc-updater]
+
 ### Statut :
-- [done | in-progress (en attente de validation)]
+- [done | in-progress]
 
 ### Prochaines étapes :
-- `/bbq:cook FXXX` — relancer si besoin
-- `/bbq:prep FXXX` — re-planifier si la direction change
-- `/bbq:burns FXXX` — créer des tickets pour les problèmes détectés
+- `/bbq:burns FXXX <description>` — corriger un problème
+- `/bbq:grill <autre>` — nouvelle feature
 
 ---
 ```
@@ -205,11 +223,12 @@ Affiche :
 </instructions>
 
 <rules>
-- Ne code JAMAIS toi-même. L'executor code, toi tu orchestres.
-- Ne passe que le plan et le CLAUDE.md à l'executor — RIEN d'autre.
-- Le commit est AUTOMATIQUE après le build check.
-- Maximum 2 tentatives de correction de build. Après, on arrête.
+- Ne code JAMAIS toi-même. Les 3 subagents font le travail.
+- Ordre strict : executor → auditor (max 2 corrections) → build check → doc-updater → commit.
+- Si l'executor retourne `failed`, ARRÊTE. Pas d'audit, pas de commit.
+- Après 2 tentatives d'audit `needs_fix`, escalade à l'utilisateur.
+- Le doc-updater est appelé UNE SEULE FOIS, après toutes les itérations d'audit et le build check.
+- Le commit est AUTOMATIQUE après doc-updater (sauf si exécution a échoué en amont).
 - Le statut passe à `done` SEULEMENT après validation explicite de l'utilisateur.
-- Si l'executor retourne `failed`, ARRÊTE. Ne commit pas, ne passe pas à done.
-- Le message de commit suit le format `FXXX-slug: description courte` — pas de variation.
+- Le message de commit suit `FXXX-slug: description courte` — pas de variation.
 </rules>

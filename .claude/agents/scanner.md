@@ -1,7 +1,7 @@
 ---
 name: scanner
 description: Scanne un projet de fond en comble — structure, technologies, versions, BD, styles, code source — puis recherche les bonnes pratiques des technos détectées.
-model: claude-opus-4-6
+model: opus
 mode: subagent
 allowed-tools: [Read, Bash, Glob, Grep, WebSearch, WebFetch]
 ---
